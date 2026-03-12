@@ -95,16 +95,28 @@ export function ImageUpload({ onImageSelect, selectedImage, onClear }: ImageUplo
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: {
+          facingMode: "user",
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
       })
       streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-      }
       setShowCamera(true)
+
+      // Wait for the video element to be rendered before setting srcObject
+      setTimeout(() => {
+        if (videoRef.current && streamRef.current) {
+          videoRef.current.srcObject = streamRef.current
+          videoRef.current.play().catch(err => {
+            console.error("Error playing video:", err)
+          })
+        }
+      }, 100)
     } catch (error) {
       console.error("Error accessing camera:", error)
-      alert("Unable to access camera. Please check permissions.")
+      alert("Unable to access camera. Please check permissions and ensure you're using HTTPS or localhost.")
     }
   }
 
@@ -117,10 +129,17 @@ export function ImageUpload({ onImageSelect, selectedImage, onClear }: ImageUplo
   }
 
   const capturePhoto = () => {
-    if (videoRef.current) {
+    if (videoRef.current && videoRef.current.videoWidth > 0) {
       const canvas = document.createElement("canvas")
       let width = videoRef.current.videoWidth
       let height = videoRef.current.videoHeight
+
+      console.log("Video dimensions:", width, height)
+
+      if (width === 0 || height === 0) {
+        alert("Camera not ready yet. Please wait a moment and try again.")
+        return
+      }
 
       // Resize to max 800px
       const maxSize = 800
@@ -137,29 +156,39 @@ export function ImageUpload({ onImageSelect, selectedImage, onClear }: ImageUplo
       const ctx = canvas.getContext("2d")
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0, width, height)
+        // Compress to 70% quality
+        const preview = canvas.toDataURL("image/jpeg", 0.7)
         canvas.toBlob((blob) => {
           if (blob) {
             const file = new File([blob], "camera-capture.jpg", { type: "image/jpeg" })
-            // Compress to 70% quality
-            const preview = canvas.toDataURL("image/jpeg", 0.7)
             onImageSelect(file, preview)
             stopCamera()
           }
         }, "image/jpeg", 0.7)
       }
+    } else {
+      alert("Camera not ready yet. Please wait a moment and try again.")
     }
   }
 
   if (showCamera) {
     return (
       <div className="glass relative overflow-hidden rounded-2xl p-6">
-        <video ref={videoRef} autoPlay playsInline className="w-full rounded-xl" />
+        <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="h-full w-full object-cover"
+          />
+        </div>
         <div className="mt-4 flex gap-3">
           <Button onClick={capturePhoto} className="flex-1">
             <Camera className="mr-2 h-4 w-4" />
             Capture Photo
           </Button>
-          <Button onClick={stopCamera} variant="outline">
+          <Button onClick={stopCamera} variant="outline" className="flex-1">
             Cancel
           </Button>
         </div>

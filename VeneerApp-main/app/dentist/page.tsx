@@ -3,8 +3,7 @@
 import { useState } from "react"
 import { ImageUpload } from "@/components/image-upload"
 import { Button } from "@/components/ui/button"
-import { ArrowRight, ArrowLeft } from "lucide-react"
-import Link from "next/link"
+import { ArrowRight } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 export default function DentistPage() {
@@ -33,15 +32,11 @@ export default function DentistPage() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b border-border/50 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <Link href="/" className="text-xl font-bold">
+        <div className="mx-auto flex max-w-7xl items-center justify-center px-4 py-4 sm:px-6 lg:px-8">
+          <div className="text-xl font-bold">
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
               VeneerVision AI
             </span>
-          </Link>
-          <div className="flex items-center gap-2 text-sm">
-            <div className="h-2 w-2 rounded-full bg-accent" />
-            <span className="text-muted-foreground">Dentist Mode</span>
           </div>
         </div>
       </header>
@@ -58,14 +53,8 @@ export default function DentistPage() {
 
           <ImageUpload onImageSelect={handleImageSelect} selectedImage={selectedImage} onClear={handleClearImage} />
 
-          <div className="flex gap-3">
-            <Button variant="outline" className="flex-1 bg-transparent" asChild>
-              <Link href="/">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Home
-              </Link>
-            </Button>
-            <Button className="flex-1" disabled={!selectedImage} onClick={handleContinue}>
+          <div className="flex justify-center">
+            <Button className="min-w-[300px]" disabled={!selectedImage} onClick={handleContinue}>
               Continue to Simulation
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>

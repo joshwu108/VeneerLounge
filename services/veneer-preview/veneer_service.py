@@ -71,21 +71,21 @@ class VeneerPreviewService:
             raise ValueError(f"Unknown model type: {self.model_type}")
 
     def _init_controlnet(self, config):
-        """Initialize ControlNet generator."""
-        from controlnet.inference_controlnet import VeneerControlNetGenerator
+        """Initialize ControlNet generator using new modular architecture."""
+        from veneers import VeneerPipeline
 
         # Only controlnet_path is required, segmentation is optional
         if 'controlnet_path' not in config:
             raise ValueError(f"Missing required config key for ControlNet: controlnet_path")
 
-        self.generator = VeneerControlNetGenerator(
+        self.generator = VeneerPipeline(
             controlnet_path=config['controlnet_path'],
-            base_model_path=config.get('base_model_path', 'runwayml/stable-diffusion-v1-5'),
+            base_model=config.get('base_model_path', 'runwayml/stable-diffusion-v1-5'),
             segmentation_checkpoint=config.get('segmentation_checkpoint', None),
             device=str(self.device)
         )
 
-        print("✓ ControlNet generator initialized")
+        print("✓ ControlNet pipeline initialized")
 
     def _init_pix2pix(self, config):
         """Initialize Pix2pix generator."""
@@ -144,40 +144,42 @@ class VeneerPreviewService:
         bounding_box,
         **kwargs
     ):
-        # Lower guidance to reduce hallucinations and distortion
-        if preserve_geometry:
-            controlnet_scale = 1.2
-            guidance_scale = 3.5
-        else:
-            controlnet_scale = 0.9
-            guidance_scale = 3.5
+        # Use preset-based parameters from new modular architecture
+        from veneers import get_preset, interpolate_presets
 
-        if custom_prompt is None:
-            if preserve_geometry:
-                prompt = """ultra realistic dental veneers, natural enamel translucency, preserved tooth alignment,
-                            consistent lighting, subtle surface microtexture, photorealistic dentistry,
-                            no change to lips, gums, face, skin, or jaw, teeth only"""
-            else:
-                prompt = """ultra realistic dental veneers, natural enamel translucency, preserved tooth alignment,
-                            consistent lighting, subtle surface microtexture, photorealistic dentistry,
-                            no change to lips, gums, face, skin, or jaw, teeth only"""
+        if preserve_geometry:
+            preset_name = 'conservative'
         else:
-            prompt = custom_prompt
+            # Map intensity (0-1) to progressively stronger presets
+            t = max(0.0, min(1.0, intensity if intensity is not None else 0.8))
+            if t < 0.3:
+                preset_name = 'conservative'
+            elif t < 0.6:
+                preset_name = 'natural'
+            elif t < 0.8:
+                preset_name = 'balanced'
+            else:
+                preset_name = 'dramatic'
 
         # Enable debug directory
         import os
         debug_dir = Path(__file__).parent.parent.parent / 'debug_outputs'
         os.makedirs(debug_dir, exist_ok=True)
 
-        result = self.generator.generate_veneer_preview(
+        # Use matching prompt template when available, else fall back to default
+        template_name = preset_name if preset_name in ('natural', 'dramatic', 'conservative') else 'default'
+
+        # Run the new pipeline
+        result = self.generator.run(
             image=image,
-            prompt=prompt,
-            num_inference_steps=kwargs.get('steps', 35),
-            guidance_scale=guidance_scale,
-            controlnet_conditioning_scale=controlnet_scale,
+            preset=preset_name,
+            prompt_template=template_name,
+            custom_prompt=custom_prompt,
+            custom_negative_prompt=None,
             seed=kwargs.get('seed', None),
             debug_dir=str(debug_dir),
-            bounding_box=bounding_box
+            bounding_box=bounding_box,
+            two_pass=kwargs.get('two_pass', False)
         )
 
         return result
