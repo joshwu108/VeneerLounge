@@ -4,8 +4,8 @@ import { useState, useEffect } from "react"
 import { VeneerShadeSelector } from "@/components/veneer-shade-selector"
 import { SimulationLoading } from "@/components/simulation-loading"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Download, FileText, Share2 } from "lucide-react"
-import Link from "next/link"
+import { Download, FileText, Share2, ArrowLeft } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -18,6 +18,7 @@ export default function DentistSimulationPage() {
   const [simulatedImages, setSimulatedImages] = useState<string[]>([])
   const [patientName, setPatientName] = useState("")
   const [patientId, setPatientId] = useState("")
+  const router = useRouter()
   const { toast } = useToast()
 
   const [boundingBox, setBoundingBox] = useState< {
@@ -48,6 +49,9 @@ export default function DentistSimulationPage() {
     }
     setIsGenerating(true)
     try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 600000) // 10 min timeout
+
       const response = await fetch("/api/simulate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -57,7 +61,10 @@ export default function DentistSimulationPage() {
           numOutputs: numVariations,
           boundingBox: boundingBox,
         }),
+        signal: controller.signal,
       })
+
+      clearTimeout(timeoutId)
 
       const data = await response.json()
 
@@ -94,15 +101,11 @@ export default function DentistSimulationPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border/50 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <Link href="/" className="text-xl font-bold">
+        <div className="mx-auto flex max-w-7xl items-center justify-center px-4 py-4 sm:px-6 lg:px-8">
+          <div className="text-xl font-bold">
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
               VeneerVision AI
             </span>
-          </Link>
-          <div className="flex items-center gap-2 text-sm">
-            <div className="h-2 w-2 rounded-full bg-accent" />
-            <span className="text-muted-foreground">Dentist Mode</span>
           </div>
         </div>
       </header>
@@ -191,11 +194,13 @@ export default function DentistSimulationPage() {
 
             {/* Action Buttons */}
             <div className="flex gap-3">
-              <Button variant="outline" className="flex-1 bg-transparent" asChild>
-                <Link href="/dentist">
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Back
-                </Link>
+              <Button
+                variant="outline"
+                className="flex-1 bg-transparent"
+                onClick={() => router.push("/dentist")}
+              >
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back
               </Button>
               <Button className="flex-1" onClick={handleGenerate} size="lg">
                 Generate {numVariations} Variation{numVariations > 1 ? "s" : ""}
@@ -284,8 +289,12 @@ export default function DentistSimulationPage() {
                   <Share2 className="mr-2 h-4 w-4" />
                   Share with Patient
                 </Button>
-                <Button variant="outline" className="bg-transparent" asChild>
-                  <Link href="/dentist">Start New Simulation</Link>
+                <Button
+                  variant="outline"
+                  className="bg-transparent"
+                  onClick={() => router.push("/dentist")}
+                >
+                  Start New Simulation
                 </Button>
               </div>
             </div>

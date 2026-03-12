@@ -174,6 +174,8 @@ class VeneerControlNetGenerator:
             edges = self.generate_edge_map(image)
             edges_np = np.array(edges)
             mask_np = np.array(mask)
+            if mask_np.ndim == 3:
+                mask_np = mask_np[..., 0] 
             edges_np[~mask_np] = 0
             edges = Image.fromarray(edges_np, mode='L')
 
@@ -202,17 +204,83 @@ class VeneerControlNetGenerator:
         refined = cv2.erode(mask_np, kernel, iterations=1)
         return Image.fromarray(refined, mode='L')
 
+    def advanced_feather_mask(self, mask, inner_feather_px=10, outer_feather_px=35):
+        """
+        Two-stage feathering: tight near teeth, wide at boundaries.
+        Better preserves tooth detail while ensuring smooth blending.
+        """
+        mask_np = (np.array(mask) > 0).astype(np.uint8) * 255
+        dist_inner = cv2.distanceTransform(mask_np, cv2.DIST_L2, 5)
+        inner_feather = np.clip(dist_inner / inner_feather_px, 0, 1)
+        inverted = 255 - mask_np
+        dist_outer = cv2.distanceTransform(inverted, cv2.DIST_L2, 5)
+        outer_feather = 1 - np.clip(dist_outer / outer_feather_px, 0, 1)
+        combined = np.minimum(inner_feather, outer_feather)
+
+        return (combined * 255).astype(np.uint8)
+
+    def poisson_blend(self, generated_crop, original, mask, offset):
+        """Seamless cloning using Poisson editing."""
+        x1, y1 = offset
+        x2, y2 = x1 + generated_crop.width, y1 + generated_crop.height
+        mask_np = np.array(mask)
+        _, binary_mask = cv2.threshold(mask_np, 127, 255, cv2.THRESH_BINARY)
+        center = (x1 + generated_crop.width // 2, y1 + generated_crop.height // 2)
+        original_np = np.array(original)
+        generated_np = np.array(generated_crop)
+
+        result = cv2.seamlessClone(
+            generated_np,
+            original_np,
+            binary_mask,
+            center,
+            cv2.NORMAL_CLONE
+        )
+
+        return Image.fromarray(result)
+
+    def alpha_blend(self, generated_crop, original, mask, offset):
+        """
+        Simple alpha blending - reliable and artifact-free.
+        """
+        x1, y1 = offset
+        original_np = np.array(original).astype(np.float32)
+        generated_np = np.array(generated_crop).astype(np.float32)
+        mask_np = np.array(mask).astype(np.float32) / 255.0
+
+        # Ensure mask is 3-channel
+        if len(mask_np.shape) == 2:
+            mask_3ch = np.stack([mask_np] * 3, axis=-1)
+        else:
+            mask_3ch = mask_np
+
+        # Extract region from original
+        h, w = generated_np.shape[:2]
+        orig_region = original_np[y1:y1+h, x1:x1+w].copy()
+
+        # Simple alpha blend: result = gen * mask + orig * (1 - mask)
+        blended = generated_np * mask_3ch + orig_region * (1.0 - mask_3ch)
+
+        # Place back
+        output = original_np.copy()
+        output[y1:y1+h, x1:x1+w] = blended
+
+        return Image.fromarray(np.clip(output, 0, 255).astype(np.uint8))
+
+
     def generate_veneer_preview(
         self,
         image,
         prompt=None,
         negative_prompt=None,
-        num_inference_steps=35,
-        guidance_scale=3.5,
-        controlnet_conditioning_scale=0.5,
+        num_inference_steps=30,
+        guidance_scale=7.5,
+        controlnet_conditioning_scale=0.45,
+        strength=0.80,
         seed=None,
         debug_dir=None,
-        bounding_box=None
+        bounding_box=None,
+        use_two_pass=False
     ):
         """
         Generate veneer preview for an input smile image.
@@ -221,9 +289,11 @@ class VeneerControlNetGenerator:
             image: PIL Image or path to image
             prompt: Text prompt (optional, uses default if None)
             negative_prompt: Negative prompt
-            num_inference_steps: Number of denoising steps
-            guidance_scale: Classifier-free guidance scale (lowered to 5.5 to reduce hallucinations)
-            controlnet_conditioning_scale: How much to follow conditioning
+            num_inference_steps: Number of denoising steps (default: 30)
+            use_two_pass: Whether to use two-pass generation (slower but higher quality)
+            guidance_scale: Classifier-free guidance scale (default: 7.5)
+            controlnet_conditioning_scale: How much to follow conditioning (default: 0.45)
+            strength: Denoising strength (default: 0.80)
             seed: Random seed for reproducibility
             debug_dir: Directory to save debug images (optional)
             bounding_box: bounding box for mouth region
@@ -269,16 +339,14 @@ class VeneerControlNetGenerator:
             tooth_mask_np[h_start:h_end, w_start:w_end] = 255
             tooth_mask = Image.fromarray(tooth_mask_np, mode="L")
         else:
-            tooth_mask = self.refine_tooth_mask(tooth_mask)
-            tooth_mask = Image.fromarray(cv2.erode(np.array(tooth_mask), np.ones((8,8), np.uint8), iterations=1), mode="L")
+            # Conservative erosion - only teeth, preserve full tooth area
+            tooth_mask = self.refine_tooth_mask(tooth_mask, erosion_px=4)
 
         mask_np = np.array(tooth_mask)
         h, w = mask_np.shape
 
-        gate = np.ones_like(mask_np, dtype=np.uint8) * 255
-        mask_np = cv2.bitwise_and(mask_np, gate)
-        #mask_np = cv2.GaussianBlur(mask_np, (5, 5), 0)
-        mask_np = self.feather_mask(mask_np, feather_px=30)
+        # Tight feathering for clean teeth-only modification
+        mask_np = self.advanced_feather_mask(tooth_mask, inner_feather_px=5, outer_feather_px=15)
         tooth_mask = Image.fromarray(mask_np, mode="L")
 
         if debug_dir:
@@ -287,27 +355,32 @@ class VeneerControlNetGenerator:
 
         offset = (x1, y1)
         crop_img, crop_mask = image, tooth_mask
-        cropped_w, cropped_h = crop_img.size
-        sd_crop_img = crop_img.resize((GEN_SIZE, GEN_SIZE), Image.LANCZOS)
-        
-        sd_crop_mask = crop_mask.resize((GEN_SIZE, GEN_SIZE), Image.LANCZOS)
-        mask_np = np.array(sd_crop_mask)
-        kernel = np.ones((6,6), np.uint8)
-        mask_np = cv2.erode(mask_np, kernel, iterations=1)
-        sd_crop_mask = Image.fromarray(mask_np, mode="L")
 
-        if debug_dir:
-            sd_crop_img.save(Path(debug_dir) / 'cropped.png')
-        
-        #generate edges only on the cropped region
+        sd_crop_img = crop_img.resize((GEN_SIZE, GEN_SIZE), Image.LANCZOS)
+        sd_crop_mask = crop_mask.resize((GEN_SIZE, GEN_SIZE), Image.NEAREST)
+
+        mask_np = np.array(sd_crop_mask)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3))
+        #mask_np = cv2.erode(mask_np, kernel, iterations=1)
+
+        mask_bin = (mask_np > 0).astype(np.uint8)
+
+        dist = cv2.distanceTransform(mask_bin, cv2.DIST_L2, 5)
+        dist_norm = np.clip(dist / 16.0, 0, 1) * 255
+        dist_norm = dist_norm.astype(np.uint8)
+
         edges = self.generate_edge_map(sd_crop_img)
         edges_np = np.array(edges)
-        edges_np[np.array(sd_crop_mask) == 0] = 0
-        conditioning = np.stack([
-            edges_np,
-            edges_np,
-            edges_np
-        ], axis=-1)
+        edges_np = edges_np * mask_bin
+
+        defect_region = (dist < 5) & (mask_bin == 1)
+        edges_np[defect_region] = 0
+
+        conditioning = np.stack(
+            [mask_np, edges_np, dist_norm],
+            axis=-1
+        )
 
         conditioning_image = Image.fromarray(conditioning)
 
@@ -319,56 +392,110 @@ class VeneerControlNetGenerator:
             conditioning_image.save(debug_path / 'conditioning_edges.png')
 
         if prompt is None:
-            prompt = """natural dental veneers, realistic enamel translucency,
-                        subtle whitening and surface refinement,
-                        maintain overall smile shape,
-                        photorealistic dentistry, teeth only"""
+            prompt = """perfect white dental veneers, bright uniform teeth,
+                        perfectly aligned straight teeth, natural enamel texture,
+                        professional teeth whitening, pristine dental work,
+                        flawless smile, perfectly symmetrical teeth, photorealistic"""
         if negative_prompt is None:
-            negative_prompt = """plastic teeth, fake smile, porcelain doll, glowing teeth, overly white, sharp edges, distorted lips, altered gums, uncanny, cartoon, CGI"""
+            negative_prompt = """yellow teeth, stained teeth, crooked teeth, misaligned teeth,
+                                plastic teeth, fake smile, porcelain doll, sharp edges,
+                                distorted lips, altered gums, altered face, uncanny, cartoon, CGI,
+                                gaps between teeth, uneven teeth"""
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
         else:
             generator = None
 
+        # ---------------------------
+        # PASS 1: GEOMETRY REBUILD
+        # ---------------------------
+
         output = self.pipe(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
+            prompt="""
+            perfect white dental veneers only, natural tooth texture,
+            sharp focus on teeth, pristine enamel,
+            professional cosmetic dentistry, high resolution teeth detail,
+            maintain original face and skin unchanged,
+            photorealistic dental work, crisp tooth edges
+            """,
+            negative_prompt="""
+            blurry, distorted face, changed face, altered skin, modified lips,
+            face modification, facial distortion, soft focus, low quality,
+            crooked teeth, yellow teeth, plastic teeth, fake teeth, CGI teeth,
+            cartoon, painting, illustration
+            """,
             image=sd_crop_img,
             mask_image=sd_crop_mask,
             control_image=conditioning_image,
-            num_inference_steps=30,
-            guidance_scale=4.0,
-            controlnet_conditioning_scale=0.5,
-            strength=0.35
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            controlnet_conditioning_scale=controlnet_conditioning_scale,
+            strength=strength,
+            generator=generator
         )
 
         generated_sd = output.images[0]
+
+        # ---------------------------
+        # PASS 2: TEXTURE + POLISH (Optional)
+        # ---------------------------
+        if use_two_pass:
+            output2 = self.pipe(
+                prompt="""
+                natural porcelain veneer texture,
+                smooth enamel microtexture,
+                subtle incisal translucency,
+                neutral white shade,
+                balanced lighting,
+                photorealistic dental photography
+                """,
+                negative_prompt="plastic teeth, blue tint, overexposed white, CGI, flat texture",
+                image=generated_sd,
+                mask_image=sd_crop_mask,
+                control_image=conditioning_image,
+                num_inference_steps=15,
+                guidance_scale=7.5,
+                controlnet_conditioning_scale=0.25,
+                strength=0.55,
+                generator=generator
+            )
+            generated_sd = output2.images[0]
 
         # Resize generated image back to the original bounding box dimensions
         bbox_w, bbox_h = x2 - x1, y2 - y1
         generated_crop = generated_sd.resize((bbox_w, bbox_h), Image.LANCZOS)
 
-        #Breaks diffusion smoothness and restores camera realism.
-        noise = np.random.normal(0, 3, np.array(generated_crop).shape).astype(np.int16)
-        generated_crop = Image.fromarray(
-            np.clip(np.array(generated_crop).astype(np.int16) + noise, 0, 255).astype(np.uint8)
-        )
-
-        #make colors match better
-        original_crop = output_image.crop((x1, y1, x2, y2))
-        generated_crop = self.match_color(generated_crop, original_crop)
-
-        # Paste the generated region back into the original image at the bounding box position
+        # Prepare final mask for alpha blending
         final_mask = sd_crop_mask.resize((bbox_w, bbox_h), Image.LANCZOS)
-        # Feather mask again at final resolution
+        # Heavy blur for smooth seamless blend
         mask_np = np.array(final_mask)
-        mask_np = cv2.GaussianBlur(mask_np, (31, 31), 0)
+        mask_np = cv2.GaussianBlur(mask_np, (51, 51), 0)
         final_mask = Image.fromarray(mask_np, mode="L")
 
-        output_image.paste(generated_crop, (x1, y1), mask=final_mask)
+        # Simple alpha blending - no face warping
+        output_image = self.alpha_blend(generated_crop, output_image, final_mask, (x1, y1))
 
         if debug_dir:
-            output_image.save(Path(debug_dir) / 'output.png')
+            output_image.save(Path(debug_dir) / 'output.png', compress_level=0)
+
+        if debug_dir:
+            debug_path = Path(debug_dir)
+            debug_path.mkdir(parents=True, exist_ok=True)
+            sd_crop_img.save(debug_path / "01_input.png")
+            sd_crop_mask.save(debug_path / "02_mask.png")
+            conditioning_image.save(debug_path / "03_conditioning.png")
+            generated_sd.save(debug_path / "04_pass2_output.png")
+
+            delta = np.mean(
+                np.abs(np.array(sd_crop_img).astype(np.int32) -
+                        np.array(generated_sd).astype(np.int32))
+            )
+
+            print(f"Diffusion delta score: {delta:.2f}")
+
+            if delta < 5:
+                print("⚠ WARNING: Diffusion ineffective — increase strength or lower ControlNet scale")
+
         return output_image
 
     def match_color(self, source, target):
@@ -460,7 +587,7 @@ def main():
     parser.add_argument(
         '--steps',
         type=int,
-        default=35,
+        default=30,
         help='Number of inference steps'
     )
     parser.add_argument(
@@ -468,6 +595,18 @@ def main():
         type=float,
         default=7.5,
         help='Guidance scale'
+    )
+    parser.add_argument(
+        '--controlnet-scale',
+        type=float,
+        default=0.45,
+        help='ControlNet conditioning scale'
+    )
+    parser.add_argument(
+        '--strength',
+        type=float,
+        default=0.80,
+        help='Denoising strength'
     )
     parser.add_argument(
         '--seed',

@@ -37,9 +37,12 @@ def get_service():
     global _service
     if _service is None:
         import os
-        model_type = os.environ.get('VENEER_MODEL_TYPE', 'controlnet')
+        model_type = os.environ.get('VENEER_MODEL_TYPE', 'sdxl')
 
-        if model_type == 'controlnet':
+        if model_type == 'sdxl':
+            # SDXL needs no special config
+            config = {}
+        elif model_type == 'controlnet':
             controlnet_path = os.environ.get(
                 'CONTROLNET_PATH',
                 'lllyasviel/control_v11p_sd15_seg'
@@ -113,7 +116,7 @@ def generate_preview():
         if image_base64.startswith("data:"):
             image_base64 = image_base64.split(",", 1)[1]
 
-        intensity = data.get('intensity', 0.8)
+        intensity = data.get('intensity', 0.75)
         preserve_geometry = data.get('preserve_geometry', False)
         custom_prompt = data.get('custom_prompt', None)
         bounding_box = data.get('bounding_box', None)
@@ -185,7 +188,7 @@ def generate_preview_file():
         image = Image.open(file.stream).convert('RGB')
 
         # Get parameters
-        intensity = float(request.form.get('intensity', 0.8))
+        intensity = float(request.form.get('intensity', 0.75))
         preserve_geometry = request.form.get('preserve_geometry', 'false').lower() == 'true'
         custom_prompt = request.form.get('custom_prompt', None)
 
@@ -263,9 +266,9 @@ def reload_model():
         data = request.json
         model_type = data.get('model_type', 'controlnet')
 
-        if model_type not in ['controlnet', 'pix2pix']:
+        if model_type not in ['sdxl', 'controlnet', 'pix2pix']:
             return jsonify({
-                'error': 'Invalid model_type. Must be "controlnet" or "pix2pix"',
+                'error': 'Invalid model_type. Must be "sdxl", "controlnet" or "pix2pix"',
                 'success': False
             }), 400
 
@@ -320,8 +323,8 @@ if __name__ == '__main__':
                        help='Host to bind to')
     parser.add_argument('--port', type=int, default=5001,
                        help='Port to bind to')
-    parser.add_argument('--model', type=str, default='controlnet',
-                       choices=['controlnet', 'pix2pix'],
+    parser.add_argument('--model', type=str, default='sdxl',
+                       choices=['sdxl', 'controlnet', 'pix2pix'],
                        help='Model type to use')
     parser.add_argument('--debug', action='store_true',
                        help='Run in debug mode')

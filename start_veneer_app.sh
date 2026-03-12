@@ -53,7 +53,7 @@ else
 fi
 
 # Start backend in background
-VENEER_MODEL_TYPE=controlnet python api_server.py --model controlnet --port 8000 > ../../logs/backend.log 2>&1 &
+VENEER_MODEL_TYPE=sdxl python api_server.py --model sdxl --port 8000 > ../../logs/backend.log 2>&1 &
 BACKEND_PID=$!
 
 echo -e "${GREEN}✓ Backend starting (PID: $BACKEND_PID)${NC}"
