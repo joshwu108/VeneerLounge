@@ -1,121 +1,140 @@
-# 🦷 VeneerVision AI
-# Note: AWS Placeholder files present, code content hidden to prevent plagiarism
+# VeneerVision AI
 
-# Web app Link: https://veneer-vision-app.vercel.app/
-
+A full-stack AI-powered dental veneer simulation application that generates realistic veneer previews from smile photos. Dentists and patients can upload a smile image, select a veneer shade, and receive AI-generated previews of potential outcomes.
 
 ![Demonstration](image.png)
 ![Demonstration](image2.png)
 
+---
 
+## Features
 
-**VeneerVision AI** is a full-stack web application that uses AI to simulate dental veneers on smile images. Built with a React frontend and Express backend, powered by the Replicate API, it enables users to upload or capture a smile photo, select veneer shades, and view AI-generated previews. Designed for both patients and dentists, it features a quiz, lead capture, PDF reports, and a "Dentist Mode" for advanced simulations.
+- **AI Veneer Simulation** using Stable Diffusion XL inpainting with custom tooth segmentation
+- **Multiple Variations** — generate up to 4 different simulation options in Dentist Mode
+- **Automatic Mouth Detection** via a trained ResNeSt50 segmentation model (with HSV fallback)
+- **Veneer Shade Selection** — choose from natural white, bright white, and other shades
+- **Smile Style Quiz** for personalized veneer recommendations
+- **PDF Report Generation** for professional consultations
+- **Lead Capture** to collect patient and dentist contact information
+- **Drag & Drop Upload** and camera capture support
+- **Responsive UI** built with Next.js and Tailwind CSS
 
 ---
 
-## 🚀 Features
-- **AI-Powered Veneer Simulation** (Replicate API: `sourav-sarkar-doc32/smile-correct`)
-- **Multiple Image Generation** (Dentist Mode: up to 4 variations)
-- **Smile Style Quiz** for personalized recommendations
-- **Drag & Drop Upload** and **Camera Capture**
-- **PDF Report Generation**
-- **Lead Capture** (with dentist info option)
-- **Downloadable Results**
-- **Modern, Responsive UI**
+## Tech Stack
+
+| Layer | Technologies |
+|-------|-------------|
+| **Frontend** | Next.js 16, React 19, TypeScript, Tailwind CSS, Radix UI, React Hook Form, Zod |
+| **Backend** | Python, Flask, Flask-CORS |
+| **ML / AI** | PyTorch, Stable Diffusion XL (Diffusers), ResNeSt50 tooth segmentation |
+| **Image Processing** | OpenCV, Pillow, scikit-image, Albumentations |
+| **Infrastructure** | Docker (NVIDIA CUDA 12.1), Docker Compose, AWS (S3, CloudFront, Elastic Beanstalk) |
+| **CI/CD** | GitHub Actions |
 
 ---
 
-## 🏃‍♂️ How to Run Locally
+## Architecture
+
+```
+VeneerLounge/
+├── VeneerApp-main/          # Next.js frontend
+│   ├── app/                 # App Router (pages + API routes)
+│   ├── components/          # React components (upload, shade selector, results, etc.)
+│   └── hooks/ & lib/        # Custom hooks and utilities
+├── services/
+│   ├── veneer-preview/      # Flask API server (port 8000)
+│   └── tooth-segmentation/  # Segmentation utilities
+├── ext/
+│   ├── veneer_generation/   # SDXL, ControlNet, and Pix2Pix model wrappers
+│   └── individual_tooth_segmentation/  # ResNeSt50 model training & inference
+├── data/                    # Training datasets and annotations
+├── infrastructure/          # AWS deployment configs
+├── DockerFile               # CUDA-enabled container
+└── docker-compose.yml       # Service orchestration
+```
+
+**Pipeline**: Upload image -> ResNeSt50 detects teeth region -> SDXL inpaints veneers onto masked area -> composited result returned to frontend.
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.10+
+- Node.js 18+
+- (Optional) NVIDIA GPU with CUDA 12.1 for faster inference
 
 ### 1. Clone the Repository
+
 ```bash
-git clone https://github.com/varundataquest/VeneerApp.git
-cd VeneerApp
+git clone https://github.com/joshwu108/VeneerLounge.git
+cd VeneerLounge
 ```
 
-### 2. Install Dependencies
+### 2. Set Up the Python Environment
+
 ```bash
-cd backend && npm install
-cd ../frontend && npm install
+bash setup_venv.sh
 ```
 
-### 3. Set Up Environment Variables
-- Copy `.env.example` to `.env` in `backend/` and add your Replicate API key:
-```
-REPLICATE_API_TOKEN=your_replicate_api_token
+### 3. Download Pretrained Models
+
+```bash
+bash setup_pretrained_models_fixed.sh
 ```
 
-### 4. Start the App
-- In one terminal:
+### 4. Install Frontend Dependencies
+
 ```bash
-cd backend && npm start
+cd VeneerApp-main && npm install
 ```
-- In another terminal:
+
+### 5. Run the App
+
 ```bash
-cd frontend && npm start
+bash start_veneer_app.sh
 ```
-- Visit [http://localhost:3000](http://localhost:3000)
+
+This starts both the Flask backend (port 8000) and the Next.js frontend (port 3000).
+
+Visit [http://localhost:3000](http://localhost:3000) to use the app.
+
+### Docker (Alternative)
+
+```bash
+docker-compose up --build
+```
+
+The backend will be available on port 8000. Start the frontend separately with `cd VeneerApp-main && npm run dev`.
 
 ---
 
-## 🌥️ About the `cloud` Branch
-This branch contains all code and configuration for cloud deployment, including:
-- Cloud-ready `.gitignore` and environment setup
-- Modular backend/frontend structure
-- Scripts and documentation for AWS deployment
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/veneer-preview` | Generate veneer preview from base64 image |
+| POST | `/api/veneer-preview/file` | Generate veneer preview from uploaded file |
+| GET | `/health` | Service health check |
+| GET | `/api/model/info` | Get currently loaded model info |
+| POST | `/api/model/reload` | Switch between SDXL, ControlNet, or Pix2Pix |
 
 ---
 
-## ☁️ AWS Cloud Integration
-Deployed VeneerVision AI as a scalable, production-grade cloud application using AWS services.
+## Supported Models
 
-### 1. **Frontend Hosting**
-- **Amazon S3 + CloudFront**: Hosted the React build as a static website with global CDN.
-- **Steps:**
-  - Built frontend: `cd frontend && npm run build`
-  - Uploaded `frontend/build/` to an S3 bucket
-  - Set up S3 static website hosting
-  - Configured CloudFront for HTTPS and caching
+| Model | Description |
+|-------|-------------|
+| **SDXL Inpainting** (default) | Stable Diffusion XL — highest quality results |
+| **ControlNet** | Segmentation-conditioned generation |
+| **Pix2Pix** | Fast baseline image-to-image translation |
 
-### 2. **Backend/API Hosting**
-- **AWS Elastic Beanstalk** (Node.js environment) or **AWS Lambda + API Gateway**
-- **Elastic Beanstalk Steps:**
-  - Zipped the `backend/` folder (with `package.json`)
-  - Deployed via AWS Console
-  - Set environment variables (API keys, etc)
-- **Lambda Steps (Serverless):**
-  - Refactored Express routes as Lambda handlers
-  - Used AWS API Gateway to expose endpoints
-  - Stored secrets in AWS Secrets Manager 
-
-### 3. **File Storage**
-- **Amazon S3**: Stored uploaded images and generated results
-- Updated backend to upload/download files from S3
-
-### 4. **CI/CD Pipeline**
-- **GitHub Actions**: Automated build, test, and deploy to AWS (Elastic Beanstalk, S3, Lambda)
-- Example: On push to `cloud` branch, trigger deployment jobs
-
-### 5. **Monitoring & Security**
-- **AWS CloudWatch**: Monitored logs and metrics
-- **IAM Roles/Policies**: Secured access to S3, Lambda, etc
-- **HTTPS**: Enforced via CloudFront and API Gateway
+Switch models at runtime via the `/api/model/reload` endpoint or the `VENEER_MODEL_TYPE` environment variable.
 
 ---
 
-## 🤝 Contributing
-Pull requests welcome! For major changes, open an issue first to discuss what you'd like to change.
+## License
 
----
-
-## 📄 License
 MIT
-
----
-
-## 💡 Inspiration
-This project demonstrates modern cloud-native app development, AI integration, and best practices for scalable deployment.
-
----
-
-**Questions?** Open an issue or contact [varundataquest](https://github.com/varundataquest) on GitHub.
