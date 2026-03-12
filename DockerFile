@@ -1,0 +1,34 @@
+FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+
+RUN apt-get update && apt-get install -y \
+    python3.10 \
+    python3-pip \
+    git \
+    libgl1 \
+    libglib2.0-0
+
+RUN ln -s /usr/bin/python3.10 /usr/bin/python
+RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+COPY ext/veneer_generation/requirements.txt /app/requirements.txt
+
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+WORKDIR /app
+COPY services/veneer-preview/ /app/services/veneer-preview/
+COPY ext/veneer_generation/controlnet/veneer_generator_simple.py /app/ext/veneer_generation/controlnet/
+COPY ext/individual_tooth_segmentation/ /app/ext/individual_tooth_segmentation/
+
+
+RUN python -c "\
+from diffusers import StableDiffusionXLInpaintPipeline; \
+import torch; \
+StableDiffusionXLInpaintPipeline.from_pretrained( \
+    'diffusers/stable-diffusion-xl-1.0-inpainting-0.1', \
+    torch_dtype=torch.float16 \
+)"
+
+ENV VENEER_MODEL_TYPE=sdxl
+EXPOSE 8000
+CMD ["python", "services/veneer-preview/api_server.py", "--port", "8000"]
+

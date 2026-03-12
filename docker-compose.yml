@@ -1,0 +1,27 @@
+services:
+  veneer-backend:
+    build:
+      context: .
+      dockerfile: DockerFile
+    ports:
+     - "8000:8000"
+    environment:
+      - VENEER_MODEL_TYPE=sdxl
+
+#For when we want to use GPU
+#services:
+#  veneer-backend:
+#    build:
+#      context: .
+#      dockerfile: DockerFile
+#    ports:
+#      - "8000:8000"
+#    environment:
+#      - VENEER_MODEL_TYPE=sdxl
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+ #           - driver: nvidia
+ #             count: 1
+ #             capabilities: [gpu]

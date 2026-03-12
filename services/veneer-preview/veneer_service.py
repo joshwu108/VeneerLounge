@@ -42,16 +42,13 @@ class VeneerPreviewService:
         Initialize the veneer preview service.
 
         Args:
-            model_type: Type of model to use ('sdxl', 'controlnet', or 'pix2pix')
+            model_type: Type of model to use ('sdxl', 'controlnet')
             **model_config: Model-specific configuration
-                For SDXL (recommended):
+                For SDXL:
                     - No required config, uses stabilityai/stable-diffusion-xl-base-1.0
                 For ControlNet:
                     - controlnet_path: Path to ControlNet weights
                     - base_model_path: Path to Stable Diffusion base
-                    - segmentation_checkpoint: Path to segmentation model
-                For Pix2pix:
-                    - checkpoint_path: Path to trained pix2pix model
                     - segmentation_checkpoint: Path to segmentation model
         """
         self.model_type = model_type
